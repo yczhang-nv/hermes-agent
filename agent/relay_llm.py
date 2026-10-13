@@ -530,6 +530,19 @@ class ManagedLlmStream(Iterator[Any]):
         if close_error is not None:
             raise close_error
 
+    def drain_local(self, timeout: float) -> None:
+        """Bound the terminal drain of a managed stream that opened no provider."""
+        if self._loop is None:
+            return
+
+        async def drain() -> None:
+            async for _ in self._stream:
+                pass
+
+        self._loop.run_until_complete(asyncio.wait_for(drain(), timeout))
+        self._finish_logical("success")
+        self._close(logical_outcome="cancelled")
+
     def _preserve_pending_provider_chunks(self) -> None:
         """Switch a failed Relay stream to its undelivered provider chunks."""
         pending = [raw for _encoded, raw in self._raw_chunks]

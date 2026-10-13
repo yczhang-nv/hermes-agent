@@ -1275,6 +1275,13 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
         except Exception:
             sock = None
         if sock is None:
+            if writer_token.get("raw_stream") is None and isinstance(event_stream, relay_llm.ManagedLlmStream):
+                # A provider-free Relay stream still owns an asynchronous terminal poll.
+                try:
+                    event_stream.drain_local(budget)
+                except TimeoutError:
+                    logger.warning("Local Relay post-terminal drain timed out")
+                return
             # Without a shutdown-capable socket a synchronous drain could become unbounded. The drain
             # is only for Relay's finalizer, so skip it and let the owner-thread finally close below.
             logger.debug("Codex post-terminal drain skipped: no interruptible stream socket found. %s",
@@ -1366,7 +1373,7 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
                     name=str(getattr(agent, "provider", "") or "codex"), model_name=str(model or ""),
                     finalizer=lambda: _consume_codex_event_stream(list(intercepted_events), model=model),
                     on_stream_created=_codex_stream_created, on_chunk=intercepted_events.append,
-                    chunk_adapter=lambda chunk: chunk,
+                    chunk_adapter=relay_llm._namespace,
                     completed_response_predicate=lambda r: bool(hasattr(r, "output") and not hasattr(r, "__iter__")),
                     metadata={"api_mode": "codex_responses", "call_role": call_role, "retry_count": attempt,
                               "api_request_id": getattr(agent, "_current_api_request_id", None)},
